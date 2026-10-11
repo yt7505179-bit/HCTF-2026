@@ -7,11 +7,10 @@ WORKDIR /src
 COPY . /src/
 RUN make && gcc -O2 -Wall -o /wrap wrap.c
 
-FROM ubuntu:22.04
+FROM debian:bookworm-slim
 COPY --from=build /src/client.elf /app/client.elf
 COPY --from=build /src/server.elf /app/server.elf
 COPY --from=build /wrap /app/wrap
-RUN chmod +x /app/client.elf /app/server.elf /app/wrap
 WORKDIR /app
 EXPOSE 9999
 # FLAG 只在运行时注入（环境变量或 /flag），不要写进镜像。
