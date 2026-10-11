@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -O0 -no-pie -fno-stack-protector -Wall
+CFLAGS  = -O0 -no-pie -fno-stack-protector -fno-inline -Wall
 CLIENT  = client.elf
 SERVER  = server.elf
 

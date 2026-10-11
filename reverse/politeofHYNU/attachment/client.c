@@ -1,10 +1,10 @@
 /*
- * HCTF 2026 新生赛 · Reverse / C-S · Client
+ * HCTF 2026 新生赛 · Reverse · Client
  *
  *   ./client.elf <host> <port>   本地 TCP，连附件里的 server.elf
  *   ./client.elf                 无参走 stdin/stdout（容器 wrap 用）
  *
- * 对端证明自己会协议之后，Client 把 flag 发给它。
+ * 对端答对两轮随机寒暄 + 一轮 XOR 之后，Client 把 flag 发给它。
  * FLAG 环境变量或 /flag 优先；都没有则发模板假 flag。
  */
 #include "proto.h"
@@ -17,15 +17,20 @@
 
 static int g_in = STDIN_FILENO;
 static int g_out = STDOUT_FILENO;
-static unsigned char g_mode = MODE_REMOTE;
-static unsigned char nonce_c[NONCE_LEN];
-static unsigned char nonce_s[NONCE_LEN];
-static unsigned char key[KEY_LEN];
 
-static void die(const char *why)
+static void die(void)
 {
-    send_pkt(g_out, CMD_ERROR, 0xff, why, (unsigned char)strlen(why));
+    send_line(g_out, "WRONG");
     _exit(1);
+}
+
+static void expect(const char *want)
+{
+    char buf[LINE_MAX];
+    if (recv_line(g_in, buf, sizeof(buf)) < 0)
+        die();
+    if (strcmp(buf, want) != 0)
+        die();
 }
 
 static void load_flag(char *buf, size_t n)
@@ -51,71 +56,126 @@ static void load_flag(char *buf, size_t n)
     snprintf(buf, n, "%s", TEMPLATE_FLAG);
 }
 
-static void do_hello(void)
+void chat1(void)
 {
-    unsigned char payload[1 + NONCE_LEN + 4];
-    unsigned char cmd, seq, len;
-    unsigned char data[MAX_DATA];
-    const char *helo = "HELO";
-    const char *welc = "WELC";
-    int i;
-
-    payload[0] = g_mode;
-    memcpy(payload + 1, nonce_c, NONCE_LEN);
-    memcpy(payload + 1 + NONCE_LEN, helo, 4);
-    if (send_pkt(g_out, CMD_HELLO, 0, payload, (unsigned char)sizeof(payload)) < 0)
-        die("send hello");
-
-    if (recv_pkt(g_in, &cmd, &seq, data, &len) < 0)
-        die("recv welcome");
-    if (cmd == CMD_ERROR)
-        die("peer err");
-    if (cmd != CMD_WELCOME || seq != 1 || len != 12)
-        die("bad welcome");
-
-    memcpy(nonce_s, data, NONCE_LEN);
-    for (i = 0; i < NONCE_LEN; i++) {
-        if (data[NONCE_LEN + i] != (unsigned char)(nonce_c[i] ^ WELCOME_XOR))
-            die("bad echo");
-    }
-    for (i = 0; i < 4; i++) {
-        if (data[8 + i] != (unsigned char)welc[i])
-            die("bad welc");
-    }
+    if (send_line(g_out, "HELLO") < 0)
+        die();
+    expect("H0w d0 U d0");
 }
 
-static void do_auth(void)
+void chat2(void)
 {
-    unsigned char chal[CHAL_LEN];
-    unsigned char expect[CHAL_LEN];
-    unsigned char cmd, seq, len;
-    unsigned char data[MAX_DATA];
+    if (send_line(g_out, "HOW IS EVERYTHING GOING") < 0)
+        die();
+    expect("N0t t00 b4d");
+}
+
+void chat3(void)
+{
+    if (send_line(g_out, "NICE TO MEET YOU") < 0)
+        die();
+    expect("N1c3 t0 m33t U 2");
+}
+
+void chat4(void)
+{
+    if (send_line(g_out, "GOOD MORNING") < 0)
+        die();
+    expect("G00d m0rn1ng t0 U");
+}
+
+void chat5(void)
+{
+    if (send_line(g_out, "HAVE A NICE DAY") < 0)
+        die();
+    expect("U 2 h4v3 4 n1c3 d4y");
+}
+
+void chat6(void)
+{
+    if (send_line(g_out, "LONG TIME NO SEE") < 0)
+        die();
+    expect("Y34h 1t h4s b33n");
+}
+
+void chat7(void)
+{
+    if (send_line(g_out, "HOW DO YOU DO") < 0)
+        die();
+    expect("I d0 v3ry w3ll");
+}
+
+void chat8(void)
+{
+    if (send_line(g_out, "TAKE CARE") < 0)
+        die();
+    expect("U t4k3 c4r3 2");
+}
+
+void chatx(void)
+{
+    static const char *tab =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    unsigned char plain[XOR_N];
+    unsigned char wire[XOR_N];
+    char hex[XOR_N * 2 + 1];
+    char buf[LINE_MAX];
     int i;
 
-    for (i = 0; i < CHAL_LEN; i++)
-        chal[i] = (unsigned char)(rand() & 0xff);
-
-    if (send_pkt(g_out, CMD_AUTH, 2, chal, CHAL_LEN) < 0)
-        die("send auth");
-
-    if (recv_pkt(g_in, &cmd, &seq, data, &len) < 0)
-        die("recv proof");
-    if (cmd == CMD_ERROR)
-        die("peer err");
-    if (cmd != CMD_PROOF || seq != 3 || len != CHAL_LEN)
-        die("bad proof");
-
-    make_proof(expect, chal, key, nonce_c, nonce_s);
-    if (memcmp(data, expect, CHAL_LEN) != 0)
-        die("proof mismatch");
+    for (i = 0; i < XOR_N; i++)
+        plain[i] = (unsigned char)tab[rand() % 62];
+    memcpy(wire, plain, XOR_N);
+    xor_buf(wire, XOR_N, XOR_KEY);
+    if (bytes_to_hex(wire, XOR_N, hex, sizeof(hex)) < 0)
+        die();
+    if (send_line(g_out, "PLEASE XOR THIS") < 0)
+        die();
+    if (send_line(g_out, hex) < 0)
+        die();
+    if (recv_line(g_in, buf, sizeof(buf)) < 0)
+        die();
+    if ((int)strlen(buf) != XOR_N)
+        die();
+    if (memcmp(buf, plain, XOR_N) != 0)
+        die();
 }
 
 static void send_grant(void)
 {
-    char flag[MAX_DATA];
+    char flag[LINE_MAX];
     load_flag(flag, sizeof(flag));
-    if (send_pkt(g_out, CMD_GRANT, 4, flag, (unsigned char)strlen(flag)) < 0)
-        die("send grant");
+    if (send_line(g_out, flag) < 0)
+        die();
+}
+
+static void chat(int n)
+{
+    switch (n) {
+    case 0:
+        chat1();
+        break;
+    case 1:
+        chat2();
+        break;
+    case 2:
+        chat3();
+        break;
+    case 3:
+        chat4();
+        break;
+    case 4:
+        chat5();
+        break;
+    case 5:
+        chat6();
+        break;
+    case 6:
+        chat7();
+        break;
+    default:
+        chat8();
+        break;
+    }
 }
 
 static int tcp_connect(const char *host, int port)
@@ -143,6 +203,7 @@ static int tcp_connect(const char *host, int port)
 int main(int argc, char **argv)
 {
     int sock = -1;
+    int a, b;
 
     setvbuf(stdin, NULL, _IONBF, 0);
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -150,35 +211,31 @@ int main(int argc, char **argv)
     signal(SIGALRM, SIG_DFL);
     alarm(60);
     srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
-    build_key(key);
-
-    {
-        int i;
-        for (i = 0; i < NONCE_LEN; i++)
-            nonce_c[i] = (unsigned char)(rand() & 0xff);
-    }
 
     if (argc >= 3) {
-        g_mode = MODE_LOCAL;
         sock = tcp_connect(argv[1], atoi(argv[2]));
-    } else if (argc == 2) {
-        g_mode = MODE_LOCAL;
-        sock = tcp_connect("127.0.0.1", atoi(argv[1]));
-    } else {
-        g_mode = MODE_REMOTE;
-        g_in = STDIN_FILENO;
-        g_out = STDOUT_FILENO;
-    }
-
-    if (g_mode == MODE_LOCAL) {
         if (sock < 0)
             return 1;
         g_in = sock;
         g_out = sock;
+    } else if (argc == 2) {
+        sock = tcp_connect("127.0.0.1", atoi(argv[1]));
+        if (sock < 0)
+            return 1;
+        g_in = sock;
+        g_out = sock;
+    } else {
+        g_in = STDIN_FILENO;
+        g_out = STDOUT_FILENO;
     }
 
-    do_hello();
-    do_auth();
+    a = rand() % 8;
+    b = rand() % 8;
+    while (b == a)
+        b = rand() % 8;
+    chat(a);
+    chat(b);
+    chatx();
     send_grant();
 
     if (sock >= 0)
