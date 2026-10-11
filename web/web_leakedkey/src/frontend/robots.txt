@@ -1,4 +1,3 @@
-# USC 统一身份认证平台 robots
 User-agent: *
 Disallow: /doc.html
 Disallow: /sc/api/
