@@ -14,4 +14,5 @@ COPY --from=build /wrap /app/wrap
 RUN chmod +x /app/client.elf /app/server.elf /app/wrap
 WORKDIR /app
 EXPOSE 9999
+# FLAG 只在运行时注入（环境变量或 /flag），不要写进镜像。
 CMD ["/app/wrap"]

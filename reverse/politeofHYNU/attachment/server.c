@@ -1,11 +1,10 @@
 /*
- * HCTF 2026 新生赛 · Reverse / C-S · Server
+ * HCTF 2026 新生赛 · Reverse · Server
  *
  *   ./server.elf [port]     默认 2333
  *
- * 只接附件 Client 的本地模式（mode='L'）。
- * 握手成功后若收到的是模板 flag 就打印；其它内容拒绝打印，
- * 避免把本程序 socat 到远端直接出真 flag。
+ * 只用于附件本地互聊。答对之后若收到的是模板 flag 就打印；
+ * 其它内容拒绝打印，避免把本程序 socat 到远端直接出真 flag。
  */
 #include "proto.h"
 
@@ -13,84 +12,163 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/socket.h>
-#include <time.h>
 
-static unsigned char key[KEY_LEN];
-
-static void send_err(int fd, const char *why)
+static void send_err(int fd)
 {
-    send_pkt(fd, CMD_ERROR, 0xff, why, (unsigned char)strlen(why));
+    send_line(fd, "WRONG");
+}
+
+int chat1(int fd, const char *q)
+{
+    if (strcmp(q, "HELLO") != 0)
+        return 0;
+    if (send_line(fd, "H0w d0 U d0") < 0)
+        return -1;
+    return 1;
+}
+
+int chat2(int fd, const char *q)
+{
+    if (strcmp(q, "HOW IS EVERYTHING GOING") != 0)
+        return 0;
+    if (send_line(fd, "N0t t00 b4d") < 0)
+        return -1;
+    return 1;
+}
+
+int chat3(int fd, const char *q)
+{
+    if (strcmp(q, "NICE TO MEET YOU") != 0)
+        return 0;
+    if (send_line(fd, "N1c3 t0 m33t U 2") < 0)
+        return -1;
+    return 1;
+}
+
+int chat4(int fd, const char *q)
+{
+    if (strcmp(q, "GOOD MORNING") != 0)
+        return 0;
+    if (send_line(fd, "G00d m0rn1ng t0 U") < 0)
+        return -1;
+    return 1;
+}
+
+int chat5(int fd, const char *q)
+{
+    if (strcmp(q, "HAVE A NICE DAY") != 0)
+        return 0;
+    if (send_line(fd, "U 2 h4v3 4 n1c3 d4y") < 0)
+        return -1;
+    return 1;
+}
+
+int chat6(int fd, const char *q)
+{
+    if (strcmp(q, "LONG TIME NO SEE") != 0)
+        return 0;
+    if (send_line(fd, "Y34h 1t h4s b33n") < 0)
+        return -1;
+    return 1;
+}
+
+int chat7(int fd, const char *q)
+{
+    if (strcmp(q, "HOW DO YOU DO") != 0)
+        return 0;
+    if (send_line(fd, "I d0 v3ry w3ll") < 0)
+        return -1;
+    return 1;
+}
+
+int chat8(int fd, const char *q)
+{
+    if (strcmp(q, "TAKE CARE") != 0)
+        return 0;
+    if (send_line(fd, "U t4k3 c4r3 2") < 0)
+        return -1;
+    return 1;
+}
+
+int chatx(int fd)
+{
+    char tag[LINE_MAX];
+    char hex[LINE_MAX];
+    unsigned char raw[XOR_N];
+    char plain[XOR_N + 1];
+    int n;
+
+    if (recv_line(fd, tag, sizeof(tag)) < 0)
+        return -1;
+    if (strcmp(tag, "PLEASE XOR THIS") != 0)
+        return -1;
+    if (recv_line(fd, hex, sizeof(hex)) < 0)
+        return -1;
+    n = hex_to_bytes(hex, raw, XOR_N);
+    if (n != XOR_N)
+        return -1;
+    xor_buf(raw, XOR_N, XOR_KEY);
+    memcpy(plain, raw, XOR_N);
+    plain[XOR_N] = '\0';
+    return send_line(fd, plain);
+}
+
+static int handle_talk(int fd)
+{
+    char q[LINE_MAX];
+    int r;
+
+    if (recv_line(fd, q, sizeof(q)) < 0)
+        return -1;
+    r = chat1(fd, q);
+    if (r != 0)
+        return r;
+    r = chat2(fd, q);
+    if (r != 0)
+        return r;
+    r = chat3(fd, q);
+    if (r != 0)
+        return r;
+    r = chat4(fd, q);
+    if (r != 0)
+        return r;
+    r = chat5(fd, q);
+    if (r != 0)
+        return r;
+    r = chat6(fd, q);
+    if (r != 0)
+        return r;
+    r = chat7(fd, q);
+    if (r != 0)
+        return r;
+    r = chat8(fd, q);
+    if (r != 0)
+        return r;
+    return -1;
 }
 
 static int handle_client(int fd)
 {
-    unsigned char cmd, seq, len;
-    unsigned char data[MAX_DATA];
-    unsigned char nonce_c[NONCE_LEN];
-    unsigned char nonce_s[NONCE_LEN];
-    unsigned char chal[CHAL_LEN];
-    unsigned char proof[CHAL_LEN];
-    unsigned char welcome[12];
-    unsigned char mode;
-    char grant[MAX_DATA + 1];
-    const char *helo = "HELO";
-    const char *welc = "WELC";
-    int i;
+    char grant[LINE_MAX];
 
-    if (recv_pkt(fd, &cmd, &seq, data, &len) < 0) {
-        send_err(fd, "bad pkt");
+    if (handle_talk(fd) != 1) {
+        send_err(fd);
         return -1;
     }
-    if (cmd != CMD_HELLO || seq != 0 || len != 9) {
-        send_err(fd, "bad hello");
+    if (handle_talk(fd) != 1) {
+        send_err(fd);
         return -1;
     }
-    mode = data[0];
-    if (mode != MODE_LOCAL) {
-        send_err(fd, "local only");
+    if (chatx(fd) < 0) {
+        send_err(fd);
         return -1;
     }
-    memcpy(nonce_c, data + 1, NONCE_LEN);
-    if (memcmp(data + 1 + NONCE_LEN, helo, 4) != 0) {
-        send_err(fd, "bad helo");
+    if (recv_line(fd, grant, sizeof(grant)) < 0) {
+        send_err(fd);
         return -1;
     }
-
-    for (i = 0; i < NONCE_LEN; i++)
-        nonce_s[i] = (unsigned char)(rand() & 0xff);
-    memcpy(welcome, nonce_s, NONCE_LEN);
-    for (i = 0; i < NONCE_LEN; i++)
-        welcome[NONCE_LEN + i] = (unsigned char)(nonce_c[i] ^ WELCOME_XOR);
-    memcpy(welcome + 8, welc, 4);
-    if (send_pkt(fd, CMD_WELCOME, 1, welcome, 12) < 0)
-        return -1;
-
-    if (recv_pkt(fd, &cmd, &seq, data, &len) < 0) {
-        send_err(fd, "bad pkt");
-        return -1;
-    }
-    if (cmd != CMD_AUTH || seq != 2 || len != CHAL_LEN) {
-        send_err(fd, "bad auth");
-        return -1;
-    }
-    memcpy(chal, data, CHAL_LEN);
-    make_proof(proof, chal, key, nonce_c, nonce_s);
-    if (send_pkt(fd, CMD_PROOF, 3, proof, CHAL_LEN) < 0)
-        return -1;
-
-    if (recv_pkt(fd, &cmd, &seq, data, &len) < 0) {
-        send_err(fd, "bad pkt");
-        return -1;
-    }
-    if (cmd != CMD_GRANT || seq != 4 || len == 0) {
-        send_err(fd, "bad grant");
-        return -1;
-    }
-    memcpy(grant, data, len);
-    grant[len] = '\0';
-
     if (strcmp(grant, TEMPLATE_FLAG) != 0) {
-        send_err(fd, "not template");
+        send_err(fd);
         fprintf(stderr, "[server] refuse non-template grant\n");
         return -1;
     }
@@ -112,8 +190,6 @@ int main(int argc, char **argv)
     setvbuf(stderr, NULL, _IONBF, 0);
     signal(SIGCHLD, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
-    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
-    build_key(key);
 
     srv = socket(AF_INET, SOCK_STREAM, 0);
     if (srv < 0)
